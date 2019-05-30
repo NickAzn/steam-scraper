@@ -3,6 +3,7 @@ import re
 from w3lib.url import canonicalize_url, url_query_cleaner
 
 from scrapy.http import FormRequest
+from scrapy.http.request import Request
 from scrapy.linkextractors import LinkExtractor
 from scrapy.spiders import CrawlSpider, Rule
 
@@ -91,14 +92,31 @@ class ProductSpider(CrawlSpider):
              restrict_css='.search_pagination_right'))
     ]
 
-    def __init__(self, steam_id=None, *args, **kwargs):
+    def __init__(self, steam_id=None, id_file=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.steam_id = steam_id
+        self.id_file = id_file
+        self.cookie = {
+            'wants_mature_content': '1',
+            'birthtime': '189302401',
+            'lastagecheckage': '1-January-1976'
+        }
+    
+    def read_ids(self):
+        with open(self.id_file, 'r') as f:
+            for id in f:
+                id = id.strip()
+                if id:
+                    yield Request(f'http://store.steampowered.com/app/{id}/',
+                                  cookies=self.cookie,
+                                  callback=self.parse_product)
 
     def start_requests(self):
         if self.steam_id:
             yield Request(f'http://store.steampowered.com/app/{self.steam_id}/',
                           callback=self.parse_product)
+        elif self.id_file:
+            yield from self.read_ids()
         else:
             yield from super().start_requests()
 
@@ -106,26 +124,11 @@ class ProductSpider(CrawlSpider):
         # Circumvent age selection form.
         if '/agecheck/app' in response.url:
             logger.debug(f'Form-type age check triggered for {response.url}.')
-
-            form = response.css('#agegate_box form')
-
-            action = form.xpath('@action').extract_first()
-            name = form.xpath('input/@name').extract_first()
-            value = form.xpath('input/@value').extract_first()
-
-            formdata = {
-                name: value,
-                'ageDay': '1',
-                'ageMonth': '1',
-                'ageYear': '1955'
-            }
-
-            yield FormRequest(
-                url=action,
-                method='POST',
-                formdata=formdata,
-                callback=self.parse_product
-            )
+            found_id = re.findall('/app/(.*?)/', response.url)
+            yield Request(f'http://store.steampowered.com/app/{found_id[0]}/',
+                          cookies=self.cookie,
+                          dont_filter=True,
+                          callback=self.parse_product)
 
         else:
             yield load_product(response)

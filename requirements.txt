@@ -30,3 +30,4 @@ smart-getenv
 Twisted
 w3lib
 zope.interface
+pypiwin32
